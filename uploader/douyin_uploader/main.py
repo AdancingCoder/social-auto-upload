@@ -644,9 +644,23 @@ class DouYinNote(DouYinBaseUploader):
         if self.publish_strategy == DOUYIN_PUBLISH_STRATEGY_SCHEDULED and self.publish_date != 0:
             await self.set_schedule_time_douyin(page, self.publish_date)
 
+        import re
+        sms_verification_notified = False
         while True:
             try:
-                publish_button = page.get_by_role("button", name="发布", exact=True)
+                # 检测短信验证码弹窗（发布前身份验证）
+                sms_title = page.get_by_text("短信验证码", exact=True).first
+                if await sms_title.count() and await sms_title.is_visible():
+                    if not sms_verification_notified:
+                        douyin_logger.warning(
+                            _msg("📱", "检测到短信验证码弹窗！请手动在浏览器中点击「获取验证码」并填写验证码，然后点击「验证」。脚本会等待验证完成。")
+                        )
+                        sms_verification_notified = True
+                    await asyncio.sleep(2)
+                    continue
+
+                # 图文发布页按钮可能是 "发布" 或 "发布图文"
+                publish_button = page.get_by_role("button", name=re.compile(r"发布"))
                 if await publish_button.count():
                     await publish_button.click()
                 await page.wait_for_url(
@@ -657,6 +671,13 @@ class DouYinNote(DouYinBaseUploader):
                 break
             except Exception:
                 douyin_logger.info(_msg("🏃", "小人正在冲刺发布图文"))
+                # 兜底：尝试点击 "发布" 精确匹配按钮
+                try:
+                    fallback_btn = page.get_by_role("button", name="发布", exact=True)
+                    if await fallback_btn.count():
+                        await fallback_btn.click()
+                except Exception:
+                    pass
                 await asyncio.sleep(0.5)
 
     async def upload(self, playwright: Playwright) -> None:
